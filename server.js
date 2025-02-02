@@ -131,11 +131,11 @@ const sendDiscordNotification = async (serverNumber, playerName, flagName, flagD
         description: `Player **${playerName}** has the flag: **${flagName}**.\n\nDescription: ${flagDescription}`,
         url: steamProfileUrl, // Link to the player's Steam profile
         thumbnail: {
-          url: steamAvatarUrl || 'https://cdn.discordapp.com/embed/avatars/0.png', // Default avatar if none is provided
+          url: steamAvatarUrl || 'https://i.ibb.co/sp9fyrSv/A7.png', // Default avatar if none is provided
         },
         color: 16711680, // Red color for warnings
         footer: {
-          text: `Server #${serverNumber} | Powered by A7 Servers`,
+          text: `Server #${serverNumber} | Powered by @A7madShooter | @Xeco`,
         },
       },
     ],
@@ -185,7 +185,7 @@ const checkPlayersForServer = async (serverNumber, serverId) => {
       for (const flag of flags) {
         const flagName = flag.attributes.name;
         const flagDescription = flag.attributes.description || 'No description provided.';
-        console.log(`Player ${playerName} on server #${serverNumber} has flag: ${flagName}`);
+        console.log(`Player ${playerName} on server #${serverNumber} is Online He is a: ${flagName}`);
 
         // Case-insensitive flag matching
         if (flagName.trim().toLowerCase() === 'possible cheater') {
