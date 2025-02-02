@@ -11,17 +11,10 @@ const port = process.env.PORT || 3000;
 const botToken = process.env.botToken;
 const webhookUrl = process.env.webhookUrl; // For cheater notifications
 const apiKey = process.env.apiKey;
-
-// Dynamically load server IDs from .env and assign numbers (#1, #2, etc.)
-const serverMap = new Map(); // Maps server number to server ID
-for (let i = 1; ; i++) {
-  const serverId = process.env[`server_id${i}`];
-  if (!serverId) break; // Stop when no more server IDs are found
-  serverMap.set(i, serverId.trim()); // Assign server number (e.g., 1 -> SERVER_ID_1)
-}
+const serverId = process.env.server_id1; // Server ID for Server #1
 
 // Validate environment variables
-if (!botToken || !webhookUrl || !apiKey || serverMap.size === 0) {
+if (!botToken || !webhookUrl || !apiKey || !serverId) {
   console.error('Missing required environment variables. Please check your .env file.');
   process.exit(1);
 }
@@ -30,7 +23,8 @@ if (!botToken || !webhookUrl || !apiKey || serverMap.size === 0) {
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 // Local caches
-const flaggedPlayersCache = {}; // Stores flagged players per server ID
+const flaggedPlayersCache = new Set(); // Tracks flagged players currently online
+const previousFlaggedPlayers = new Set(); // Tracks previously flagged players for removal
 
 // Rate limiting variables
 const maxApiCallsPerMinute = 60; // Maximum allowed API calls per minute
@@ -58,8 +52,8 @@ const enforceRateLimit = async () => {
   apiCallCount++;
 };
 
-// Fetch online players for a specific server
-const getOnlinePlayers = async (serverId, serverNumber) => {
+// Fetch online players for Server #1
+const getOnlinePlayers = async () => {
   let allPlayers = [];
   let nextPage = `https://api.battlemetrics.com/players?filter[servers]=${serverId}&filter[online]=true&fields[player]=name&page[size]=100&sort=-updatedAt`;
 
@@ -73,10 +67,10 @@ const getOnlinePlayers = async (serverId, serverNumber) => {
         },
       });
 
-      console.log(`API Response (Players for Server #${serverNumber}):`, JSON.stringify(response.data, null, 2));
+      console.log(`API Response (Players for Server #1):`, JSON.stringify(response.data, null, 2));
 
       if (!response.data || !response.data.data || response.data.data.length === 0) {
-        console.log(`No online players found for server #${serverNumber}.`);
+        console.log(`No online players found for Server #1.`);
         break;
       }
 
@@ -84,16 +78,16 @@ const getOnlinePlayers = async (serverId, serverNumber) => {
       nextPage = response.data.links?.next || null; // Check for next page
     }
 
-    console.log(`Found ${allPlayers.length} online players for server #${serverNumber}.`);
+    console.log(`Found ${allPlayers.length} online players for Server #1.`);
     return allPlayers; // Return all players without slicing
   } catch (error) {
-    console.error(`Error fetching players for server #${serverNumber}:`, error.message);
+    console.error(`Error fetching players for Server #1:`, error.message);
     return [];
   }
 };
 
 // Fetch player flags for a specific player
-const getPlayerFlags = async (playerId, serverNumber) => {
+const getPlayerFlags = async (playerId) => {
   const url = `https://api.battlemetrics.com/players/${playerId}`;
   const headers = {
     Authorization: `Bearer ${apiKey}`,
@@ -107,35 +101,35 @@ const getPlayerFlags = async (playerId, serverNumber) => {
     await enforceRateLimit(); // Enforce rate limiting before making the API call
 
     const response = await axios.get(url, { headers, params });
-    console.log(`API Response (Player Flags for Player ${playerId} on Server #${serverNumber}):`, JSON.stringify(response.data, null, 2));
+    console.log(`API Response (Player Flags for Player ${playerId}):`, JSON.stringify(response.data, null, 2));
 
     if (!response.data || !response.data.included || response.data.included.length === 0) {
-      console.log(`No flags found for player ID ${playerId} on server #${serverNumber}.`);
+      console.log(`No flags found for player ID ${playerId}.`);
       return [];
     }
 
-    console.log(`Found ${response.data.included.length} flags for player ID ${playerId} on server #${serverNumber}.`);
+    console.log(`Found ${response.data.included.length} flags for player ID ${playerId}.`);
     return response.data.included.filter(item => item.type === 'playerFlag');
   } catch (error) {
-    console.error(`Error fetching player flags for player ID ${playerId} on server #${serverNumber}:`, error.message);
+    console.error(`Error fetching player flags for player ID ${playerId}:`, error.message);
     return [];
   }
 };
 
 // Send Discord notification for flagged players
-const sendDiscordNotification = async (serverNumber, playerName, flagName, flagDescription, steamProfileUrl, steamAvatarUrl) => {
+const sendDiscordNotification = async (playerName, flagName, flagDescription, steamProfileUrl, steamAvatarUrl) => {
   const data = {
     embeds: [
       {
-        title: `⚠️ Possible Cheater Detected on Server #${serverNumber}`,
+        title: `⚠️ Possible Cheater Detected on Server #1`,
         description: `Player **${playerName}** has the flag: **${flagName}**.\n\nDescription: ${flagDescription}`,
         url: steamProfileUrl, // Link to the player's Steam profile
         thumbnail: {
-          url: steamAvatarUrl || 'https://i.ibb.co/sp9fyrSv/A7.png', // Default avatar if none is provided
+          url: steamAvatarUrl || 'https://cdn.discordapp.com/embed/avatars/0.png', // Default avatar if none is provided
         },
         color: 16711680, // Red color for warnings
         footer: {
-          text: `Server #${serverNumber} | Powered by @A7madShooter | @Xeco`,
+          text: `Server #1 | Powered by A7 Servers`,
         },
       },
     ],
@@ -144,27 +138,52 @@ const sendDiscordNotification = async (serverNumber, playerName, flagName, flagD
   try {
     const response = await axios.post(webhookUrl, data);
     if (response.status === 204) {
-      console.log(`Notification sent for player: ${playerName} on server #${serverNumber}`);
+      console.log(`Notification sent for player: ${playerName}`);
     }
   } catch (error) {
-    console.error(`Failed to send Discord notification for server #${serverNumber}:`, error.message);
+    console.error(`Failed to send Discord notification:`, error.message);
   }
 };
 
-// Check players and send notifications for a specific server
-const checkPlayersForServer = async (serverNumber, serverId) => {
-  console.log(`Fetching online players for server #${serverNumber} (ID: ${serverId})...`);
-  const players = await getOnlinePlayers(serverId, serverNumber);
+// Remove Discord notification for players who left the server
+const removeDiscordNotification = async (playerName) => {
+  const data = {
+    embeds: [
+      {
+        title: `✅ Possible Cheater Left Server #1`,
+        description: `Player **${playerName}** is no longer online.`,
+        color: 3447003, // Green color for removal
+        footer: {
+          text: `Server #1 | Powered by A7 Servers`,
+        },
+      },
+    ],
+  };
+
+  try {
+    const response = await axios.post(webhookUrl, data);
+    if (response.status === 204) {
+      console.log(`Removal notification sent for player: ${playerName}`);
+    }
+  } catch (error) {
+    console.error(`Failed to send removal notification:`, error.message);
+  }
+};
+
+// Check players and handle notifications for Server #1
+const checkPlayersForServer = async () => {
+  console.log(`Starting scan for all online players in Server #1...`);
+  const players = await getOnlinePlayers();
 
   if (players.length === 0) {
-    console.log(`No online players to check for server #${serverNumber}.`);
+    console.log(`No online players to check for Server #1.`);
     return;
   }
 
-  // Initialize cache for this server if it doesn't exist
-  if (!flaggedPlayersCache[serverId]) {
-    flaggedPlayersCache[serverId] = new Set();
-  }
+  console.log(`Processing ${players.length} online players in Server #1...`);
+
+  // Track current flagged players during this scan
+  const currentFlaggedPlayers = new Set();
 
   for (const player of players) {
     const playerName = player.attributes.name;
@@ -172,42 +191,51 @@ const checkPlayersForServer = async (serverNumber, serverId) => {
     const steamProfileUrl = player.attributes.profile || null; // Steam profile URL
     const steamAvatarUrl = player.attributes.avatar || null; // Steam avatar URL
 
-    // Skip if the player has already been flagged for this server
-    if (flaggedPlayersCache[serverId].has(playerId)) {
-      console.log(`Player ${playerName} (ID: ${playerId}) on server #${serverNumber} has already been flagged. Skipping...`);
-      continue;
-    }
+    console.log(`Checking player: ${playerName} (ID: ${playerId}) on Server #1`);
 
-    console.log(`Checking player: ${playerName} on server #${serverNumber}`);
-
-    const flags = await getPlayerFlags(playerId, serverNumber); // Call the getPlayerFlags function
+    const flags = await getPlayerFlags(playerId); // Call the getPlayerFlags function
     if (flags.length > 0) {
       for (const flag of flags) {
         const flagName = flag.attributes.name;
         const flagDescription = flag.attributes.description || 'No description provided.';
-        console.log(`Player ${playerName} on server #${serverNumber} is Online He is a: ${flagName}`);
+        console.log(`Player ${playerName} on Server #1 has flag: ${flagName}`);
 
         // Case-insensitive flag matching
         if (flagName.trim().toLowerCase() === 'possible cheater') {
-          await sendDiscordNotification(
-            serverNumber,
-            playerName,
-            flagName,
-            flagDescription,
-            steamProfileUrl,
-            steamAvatarUrl
-          );
+          // Add the player to the current flagged players set
+          currentFlaggedPlayers.add(playerId);
 
-          // Add the player to the flagged cache for this server
-          flaggedPlayersCache[serverId].add(playerId);
-          console.log(`Added player ${playerName} (ID: ${playerId}) to the flagged cache for server #${serverNumber}.`);
+          // If the player is not already flagged, send a notification
+          if (!flaggedPlayersCache.has(playerId)) {
+            await sendDiscordNotification(
+              playerName,
+              flagName,
+              flagDescription,
+              steamProfileUrl,
+              steamAvatarUrl
+            );
+            flaggedPlayersCache.add(playerId);
+            console.log(`Added player ${playerName} (ID: ${playerId}) to the flagged cache.`);
+          }
         }
       }
     }
   }
+
+  // Identify players who are no longer online and remove their notifications
+  for (const playerId of flaggedPlayersCache) {
+    if (!currentFlaggedPlayers.has(playerId)) {
+      const playerName = players.find(player => player.id === playerId)?.attributes.name || 'Unknown Player';
+      await removeDiscordNotification(playerName);
+      flaggedPlayersCache.delete(playerId);
+      console.log(`Removed player ${playerName} (ID: ${playerId}) from the flagged cache.`);
+    }
+  }
+
+  console.log(`Finished scanning all players in Server #1.`);
 };
 
-// Check players for all servers sequentially
+// Periodically check players for Server #1
 const checkServers = async () => {
   const now = Date.now();
   const resetInterval = 60000; // 1 minute in milliseconds
@@ -218,18 +246,12 @@ const checkServers = async () => {
     lastResetTime = now;
   }
 
-  // Loop through all servers sequentially
-  for (const [serverNumber, serverId] of serverMap.entries()) {
-    console.log(`Starting checks for server #${serverNumber} (ID: ${serverId})...`);
+  // Check players for Server #1
+  await checkPlayersForServer();
 
-    // Check players
-    await checkPlayersForServer(serverNumber, serverId);
-
-    // Stop checking if the global API call limit is reached
-    if (apiCallCount >= maxApiCallsPerMinute) {
-      console.log(`Reached the maximum API call limit (${maxApiCallsPerMinute}/minute). Pausing checks until the next minute.`);
-      break;
-    }
+  // Stop checking if the global API call limit is reached
+  if (apiCallCount >= maxApiCallsPerMinute) {
+    console.log(`Reached the maximum API call limit (${maxApiCallsPerMinute}/minute). Pausing checks until the next minute.`);
   }
 };
 
