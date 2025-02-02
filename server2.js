@@ -125,7 +125,7 @@ const sendDiscordNotification = async (playerName, flagName, flagDescription, st
         description: `Player **${playerName}** has the flag: **${flagName}**.\n\nDescription: ${flagDescription}`,
         url: steamProfileUrl, // Link to the player's Steam profile
         thumbnail: {
-          url: steamAvatarUrl || 'https://cdn.discordapp.com/embed/avatars/0.png', // Default avatar if none is provided
+          url: steamAvatarUrl || 'https://i.ibb.co/sp9fyrSv/A7.png', // Default avatar if none is provided
         },
         color: 16711680, // Red color for warnings
         footer: {
@@ -154,7 +154,7 @@ const removeDiscordNotification = async (playerName) => {
         description: `Player **${playerName}** is no longer online.`,
         color: 3447003, // Green color for removal
         footer: {
-          text: `Server #1 | Powered by A7 Servers`,
+          text: `Server #1 | Powered by @A7madShooter | @Xeco`,
         },
       },
     ],
